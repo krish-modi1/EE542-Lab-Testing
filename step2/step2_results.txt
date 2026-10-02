@@ -1,8 +1,5 @@
-GPU: NVIDIA GeForce RTX 3060
-engine: ../step1/resnet18_fp16.engine
-frames received: 16 of 16 (missing: none)
+GPU: NVIDIA GeForce RTX 3060 Laptop GPU
+frames received: 16 of 16
 byte-exact frames: 16 of 16
 prediction match (received vs original): 1.000
-host->GPU copy of 16 frames (2.41 MB): 0.501 ms
-GPU preprocess + inference (first call, includes context setup): 71.586 ms
-predicted classes (first 8): [885, 818, 721, 818, 818, 709, 709, 709]
+CPU->GPU copy of 16 frames (2.41 MB): 1.815 ms

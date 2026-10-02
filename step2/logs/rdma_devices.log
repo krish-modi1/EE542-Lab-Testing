@@ -1,4 +1,3 @@
-== RDMA devices on this machine ==
-    device          	   node GUID
-    ------          	----------------
-00:02.0 Ethernet controller: Red Hat, Inc. Virtio network device
+RDMA devices:
+Failed to get IB devices list: Function not implemented
+Network cards:

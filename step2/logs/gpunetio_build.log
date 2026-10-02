@@ -1,7 +1,8 @@
+make: Entering directory '/home/krish/EE542-Lab-Testing/step2/gpunetio'
 Configuring library
 Compiling src/doca_verbs_dev.cpp -> obj/doca_verbs_dev.o
-Compiling src/doca_verbs_cq.cpp -> obj/doca_verbs_cq.o
 Compiling src/doca_verbs_qp.cpp -> obj/doca_verbs_qp.o
+Compiling src/doca_verbs_cq.cpp -> obj/doca_verbs_cq.o
 Compiling src/doca_verbs_device_attr.cpp -> obj/doca_verbs_device_attr.o
 Compiling src/doca_verbs_umem.cpp -> obj/doca_verbs_umem.o
 Compiling src/doca_verbs_srq.cpp -> obj/doca_verbs_srq.o
@@ -16,16 +17,16 @@ Compiling src/doca_verbs_umem_sdk_wrapper.cpp -> obj/doca_verbs_umem_sdk_wrapper
 Compiling src/doca_verbs_uar_sdk_wrapper.cpp -> obj/doca_verbs_uar_sdk_wrapper.o
 Compiling src/doca_verbs_cq_sdk_wrapper.cpp -> obj/doca_verbs_cq_sdk_wrapper.o
 Compiling src/doca_verbs_qp_sdk_wrapper.cpp -> obj/doca_verbs_qp_sdk_wrapper.o
-make[1]: Entering directory '/root/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_put_bw'
+make[1]: Entering directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_put_bw'
 make[1]: Nothing to be done for 'all'.
-make[1]: Leaving directory '/root/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_put_bw'
-make[1]: Entering directory '/root/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_lat'
+make[1]: Leaving directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_put_bw'
+make[1]: Entering directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_lat'
 make[1]: Nothing to be done for 'all'.
-make[1]: Leaving directory '/root/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_lat'
-make[1]: Entering directory '/root/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_bw'
+make[1]: Leaving directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_lat'
+make[1]: Entering directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_bw'
 make[1]: Nothing to be done for 'all'.
-make[1]: Leaving directory '/root/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_bw'
+make[1]: Leaving directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_bw'
 Linking library lib/libdoca_gpunetio_host.so.4.0.1
-Installing library to /root/EE542-Lab-Testing/step2/gpunetio/install/lib and headers to /root/EE542-Lab-Testing/step2/gpunetio/install/include
-Installing examples to /root/EE542-Lab-Testing/step2/gpunetio/install/examples
-build exit code: 0
+Installing library to /home/krish/EE542-Lab-Testing/step2/gpunetio/install/lib and headers to /home/krish/EE542-Lab-Testing/step2/gpunetio/install/include
+Installing examples to /home/krish/EE542-Lab-Testing/step2/gpunetio/install/examples
+make: Leaving directory '/home/krish/EE542-Lab-Testing/step2/gpunetio'

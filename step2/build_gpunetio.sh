@@ -13,10 +13,12 @@ sudo apt-get install -y rdma-core libibverbs-dev ibverbs-utils
 { echo "RDMA devices:"; ibv_devices; echo "Network cards:"; lspci | grep -i ethernet; } \
   2>&1 | tee logs/rdma_devices.log
 
-# Build the library and its examples for this GPU.
+# Build the library and its examples for this GPU. The GPUNetIO Makefile assumes
+# CUDA_HOME=/usr/local/cuda; Ubuntu's nvidia-cuda-toolkit puts nvcc under /usr instead.
+CUDA_HOME=${CUDA_HOME:-$(dirname "$(dirname "$(command -v nvcc)")")}
 [ -d gpunetio ] || git clone --depth 1 https://github.com/NVIDIA-DOCA/gpunetio.git
 make -C gpunetio -j"$(nproc)" install install_examples PREFIX="$PWD/gpunetio/install" \
-  CUDA_ARCH="$ARCH" 2>&1 | tee logs/gpunetio_build.log
+  CUDA_ARCH="$ARCH" CUDA_HOME="$CUDA_HOME" 2>&1 | tee logs/gpunetio_build.log
 
 # Run one example. nvidia-smi prints the GPU as 00000000:07:00.0; the example wants 07:00.0.
 GPU_PCI=$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -n 1 | cut -d: -f2- | tr 'A-F' 'a-f')

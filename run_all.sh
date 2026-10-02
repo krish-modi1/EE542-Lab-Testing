@@ -122,13 +122,20 @@ NIC_PCI=$(lspci | grep -i -E 'ethernet|network' | head -n 1 | cut -d' ' -f1)
 NIC_PCI=${NIC_PCI:-00:00.0}
 SAMPLE=/opt/mellanox/doca/samples/doca_gpunetio/gpunetio_simple_receive
 doca() {
-	sudo docker run --rm --gpus all --privileged --net=host -v "$ROOT/step2/doca_build:/build" \
-		"$DOCA_IMG" bash -c "$1"
+	# In WSL the GPU driver libraries live on the host in /usr/lib/wsl/lib. Without them the
+	# container has nvidia-smi but no CUDA device, which hides the real (hardware) blocker.
+	local wsl=() pre=""
+	if [ -d /usr/lib/wsl/lib ]; then
+		wsl=(-v /usr/lib/wsl:/usr/lib/wsl:ro)
+		pre="export LD_LIBRARY_PATH=/usr/lib/wsl/lib:\$LD_LIBRARY_PATH; "
+	fi
+	sudo docker run --rm --gpus all --privileged --net=host "${wsl[@]}" \
+		-v "$ROOT/step2/doca_build:/build" "$DOCA_IMG" bash -c "$pre$1"
 }
 check "Step 4: pull DOCA container $DOCA_IMG" sudo docker pull "$DOCA_IMG"
-check "Step 4: DOCA tools run" doca 'doca_caps --list-devs || /opt/mellanox/doca/tools/doca_caps --list-devs'
+check "Step 4: DOCA tools run" doca 'doca_caps --version && doca_caps --list-libs'
 blocker "Step 4: DOCA finds a supported network card" doca \
-	'(doca_caps --list-devs || /opt/mellanox/doca/tools/doca_caps --list-devs) | grep -q -i mlx5'
+	'doca_caps --list-devs 2>&1 | tee /tmp/devs; grep -q -i mlx5 /tmp/devs'
 check "Step 4: build DOCA GPUNetIO sample" doca \
 	"cd $SAMPLE && rm -rf /build/rx && meson setup /build/rx && ninja -C /build/rx"
 # The sample loops forever once it starts, so a timeout (exit 124) means it worked.
