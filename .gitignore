@@ -6,3 +6,4 @@
 __pycache__/
 step2/dpdk_rx
 step2/gpunetio/
+step2/doca_build/
