@@ -78,24 +78,26 @@ def main():
         with torch.inference_mode():
             ref = model(src)
             ms = bench(lambda x: model(x), src)
-        rows.append(("PyTorch FP32", b, ms, b / ms * 1e3, 0.0))
+        rows.append(("PyTorch FP32", b, ms, b / ms * 1e3, "ref", "ref"))
 
         for name, eng in engines.items():
             run, stream = trt_infer_fn(eng, b)
-            out = run(src).clone()
-            stream.synchronize()
+            out = run(src)
+            stream.synchronize()  # wait for TensorRT before reading the output
+            out = out.float().clone()
+            maxdiff = (out - ref).abs().max().item()
             # correctness check against PyTorch: top-1 agreement and max abs logit diff
             agree = (out.argmax(1) == ref.argmax(1)).float().mean().item()
             ms = bench(run, src, stream)
-            rows.append((name, b, ms, b / ms * 1e3, agree))
+            rows.append((name, b, ms, b / ms * 1e3, f"{agree:.3f}", f"{maxdiff:.4f}"))
 
     print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"{'impl':14s}{'batch':>6s}{'ms/batch':>11s}{'img/s':>10s}{'top1 agree':>12s}")
+    print(f"{'impl':14s}{'batch':>6s}{'ms/batch':>11s}{'img/s':>10s}{'top1 agree':>12s}{'max diff':>10s}")
     for r in rows:
-        print(f"{r[0]:14s}{r[1]:6d}{r[2]:11.3f}{r[3]:10.1f}{r[4]:12.3f}")
+        print(f"{r[0]:14s}{r[1]:6d}{r[2]:11.3f}{r[3]:10.1f}{r[4]:>12s}{r[5]:>10s}")
     with open("results.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["impl", "batch", "ms_per_batch", "images_per_s", "top1_agreement_vs_pytorch"])
+        w.writerow(["impl", "batch", "ms_per_batch", "images_per_s", "top1_agreement_vs_pytorch", "max_abs_logit_diff"])
         w.writerows(rows)
     print("wrote results.csv")
 
