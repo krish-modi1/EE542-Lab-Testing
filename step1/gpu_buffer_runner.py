@@ -1,13 +1,10 @@
-"""Step 1c: run the TensorRT engine on input that is ALREADY in GPU memory, and benchmark
-PyTorch vs TensorRT FP32 vs TensorRT FP16.
+"""Run the TensorRT engines on input that is already in GPU memory, and compare their
+speed and predictions with PyTorch. Writes results.csv.
 
-Why GPU buffers: with DOCA GPUNetIO the NIC writes packet payloads straight into GPU memory,
-so the inference code must accept a device pointer, not a host array. Here a torch CUDA tensor
-stands in for that buffer (its memory comes from cudaMalloc via PyTorch's allocator), and we pass
-its raw device address (tensor.data_ptr()) to TensorRT.
+Why GPU memory: with DOCA GPUNetIO the network card writes packets straight into GPU
+memory, so the inference code must take a GPU address, not a CPU array.
 
-Written against the TensorRT 10 Python API (set_tensor_address / execute_async_v3).
-Output: results.csv plus a printed table.
+Step 2 imports load_engine() and make_runner() from this file.
 """
 import csv
 import time
@@ -16,91 +13,74 @@ import tensorrt as trt
 import torch
 import torchvision
 
-BATCHES = [1, 8, 32]
-WARMUP, ITERS = 20, 200
-dev = torch.device("cuda")
-logger = trt.Logger(trt.Logger.WARNING)
-TRT2TORCH = {trt.float32: torch.float32, trt.float16: torch.float16}
+TORCH_DTYPE = {trt.float32: torch.float32, trt.float16: torch.float16}
 
 
 def load_engine(path):
-    with open(path, "rb") as f:
-        return trt.Runtime(logger).deserialize_cuda_engine(f.read())
+    runtime = trt.Runtime(trt.Logger(trt.Logger.WARNING))
+    return runtime.deserialize_cuda_engine(open(path, "rb").read())
 
 
-def trt_infer_fn(engine, batch):
-    """Return a closure that runs one inference on a device buffer of the given batch size."""
+def make_runner(engine, batch):
+    """Allocate GPU input/output buffers for `batch` images. Returns run(x) -> logits."""
     ctx = engine.create_execution_context()
     ctx.set_input_shape("input", (batch, 3, 224, 224))
-    # Buffer dtypes follow the engine: FP32 engine -> float32, FP16 engine -> float16.
-    in_dt = TRT2TORCH[engine.get_tensor_dtype("input")]
-    out_dt = TRT2TORCH[engine.get_tensor_dtype("logits")]
-    # These two tensors are the "DOCA-delivered" input buffer and the output buffer.
-    inp = torch.empty((batch, 3, 224, 224), device=dev, dtype=in_dt)
-    out = torch.empty((batch, 1000), device=dev, dtype=out_dt)
-    ctx.set_tensor_address("input", inp.data_ptr())   # raw device pointer
+    inp = torch.empty((batch, 3, 224, 224), device="cuda",
+                      dtype=TORCH_DTYPE[engine.get_tensor_dtype("input")])
+    out = torch.empty((batch, 1000), device="cuda",
+                      dtype=TORCH_DTYPE[engine.get_tensor_dtype("logits")])
+    ctx.set_tensor_address("input", inp.data_ptr())  # TensorRT reads this GPU address
     ctx.set_tensor_address("logits", out.data_ptr())
     stream = torch.cuda.Stream()
 
-    def run(src):
-        # Copy and inference on the same stream so they are ordered.
-        # In the real pipeline the NIC would fill `inp` instead of this copy.
+    def run(x):
+        stream.wait_stream(torch.cuda.current_stream())  # x must be ready before we copy it
         with torch.cuda.stream(stream):
-            inp.copy_(src, non_blocking=True)  # also casts float32 -> float16 for the FP16 engine
+            inp.copy_(x)  # with GPUNetIO, the network card would fill `inp` instead
             ctx.execute_async_v3(stream.cuda_stream)
-        return out
+        stream.synchronize()  # wait for TensorRT before anyone reads `out`
+        return out.float()
 
-    return run, stream
+    return run
 
 
-def bench(fn, src, stream=None):
-    for _ in range(WARMUP):
-        fn(src)
+def time_ms(fn, x, iters=200, warmup=20):
+    for _ in range(warmup):
+        fn(x)
     torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    for _ in range(ITERS):
-        fn(src)
-    (stream.synchronize() if stream else torch.cuda.synchronize())
+    start = time.perf_counter()
+    for _ in range(iters):
+        fn(x)
     torch.cuda.synchronize()
-    return (time.perf_counter() - t0) / ITERS * 1e3  # ms per batch
+    return (time.perf_counter() - start) / iters * 1000
 
 
-def main():
-    model = torchvision.models.resnet18(
-        weights=torchvision.models.ResNet18_Weights.DEFAULT).eval().to(dev)
+if __name__ == "__main__":
+    model = torchvision.models.resnet18(weights="DEFAULT").eval().cuda()
     engines = {"TRT FP32": load_engine("resnet18_fp32.engine"),
                "TRT FP16": load_engine("resnet18_fp16.engine")}
 
     rows = []
-    for b in BATCHES:
-        src = torch.randn(b, 3, 224, 224, device=dev)
-
+    for batch in (1, 8, 32):
+        # Random input is enough: we measure speed and whether TensorRT agrees with PyTorch.
+        x = torch.randn(batch, 3, 224, 224, device="cuda")
         with torch.inference_mode():
-            ref = model(src)
-            ms = bench(lambda x: model(x), src)
-        rows.append(("PyTorch FP32", b, ms, b / ms * 1e3, "ref", "ref"))
+            ref = model(x)
+            rows.append(["PyTorch FP32", batch, time_ms(model, x), "ref", "ref"])
+        for name, engine in engines.items():
+            run = make_runner(engine, batch)
+            y = run(x)
+            agree = (y.argmax(1) == ref.argmax(1)).float().mean().item()
+            diff = (y - ref).abs().max().item()
+            rows.append([name, batch, time_ms(run, x), f"{agree:.3f}", f"{diff:.4f}"])
 
-        for name, eng in engines.items():
-            run, stream = trt_infer_fn(eng, b)
-            out = run(src)
-            stream.synchronize()  # wait for TensorRT before reading the output
-            out = out.float().clone()
-            maxdiff = (out - ref).abs().max().item()
-            # correctness check against PyTorch: top-1 agreement and max abs logit diff
-            agree = (out.argmax(1) == ref.argmax(1)).float().mean().item()
-            ms = bench(run, src, stream)
-            rows.append((name, b, ms, b / ms * 1e3, f"{agree:.3f}", f"{maxdiff:.4f}"))
+    print("GPU:", torch.cuda.get_device_name())
+    print(f"{'impl':14}{'batch':>6}{'ms':>9}{'img/s':>9}{'top1':>8}{'maxdiff':>9}")
+    for impl, batch, ms, agree, diff in rows:
+        print(f"{impl:14}{batch:>6}{ms:>9.3f}{batch / ms * 1000:>9.0f}{agree:>8}{diff:>9}")
 
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"{'impl':14s}{'batch':>6s}{'ms/batch':>11s}{'img/s':>10s}{'top1 agree':>12s}{'max diff':>10s}")
-    for r in rows:
-        print(f"{r[0]:14s}{r[1]:6d}{r[2]:11.3f}{r[3]:10.1f}{r[4]:>12s}{r[5]:>10s}")
     with open("results.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["impl", "batch", "ms_per_batch", "images_per_s", "top1_agreement_vs_pytorch", "max_abs_logit_diff"])
-        w.writerows(rows)
+        writer = csv.writer(f)
+        writer.writerow(["impl", "batch", "ms_per_batch", "top1_agreement", "max_logit_diff"])
+        writer.writerows([[i, b, f"{ms:.3f}", a, d] for i, b, ms, a, d in rows])
     print("wrote results.csv")
-
-
-if __name__ == "__main__":
-    main()
