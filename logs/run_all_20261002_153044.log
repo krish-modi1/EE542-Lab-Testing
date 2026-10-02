@@ -1,0 +1,434 @@
+
+================ Machine ================
+Fri Oct  2 15:30:44 PDT 2026
+Linux Krish 6.18.40.1-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Fri Jul 31 22:12:15 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.3 LTS"
+Fri Oct  2 15:30:44 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 615.78.02              KMD Version: 617.14        CUDA UMD Version: 13.4     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GeForce RTX 3060 ...    On  |   00000000:01:00.0  On |                  N/A |
+| N/A   59C    P0             24W /  106W |    1374MiB /   6144MiB |      6%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+NVIDIA network cards (ConnectX / BlueField):
+  none
+All network cards:
+  none visible (normal in WSL and some VMs)
+
+================ Step 1: versions ================
+Fri Oct  2 15:30:44 PDT 2026
++ bash setup_check.sh
+name, driver_version, memory.total [MiB]
+NVIDIA GeForce RTX 3060 Laptop GPU, 617.14, 6144 MiB
+Build cuda_12.0.r12.0/compiler.32267302_0
+torch 2.14.1+cu130 | CUDA available: True
+torchvision 0.29.1+cu130 | onnx 1.23.1 | tensorrt 11.3.0.99
+
+================ Step 1: export ResNet-18 to ONNX (fp32, fp16) ================
+Fri Oct  2 15:30:48 PDT 2026
++ python3 export_onnx.py
+/home/krish/EE542-Lab-Testing/step1/export_onnx.py:14: UserWarning: # 'dynamic_axes' is not recommended when dynamo=True, and may lead to 'torch._dynamo.exc.UserError: Constraints violated.' Supply the 'dynamic_shapes' argument instead if export is unsuccessful.
+  torch.onnx.export(
+/home/krish/EE542-Lab-Testing/step1/export_onnx.py:14: UserWarning: # 'dynamic_axes' is not recommended when dynamo=True, and may lead to 'torch._dynamo.exc.UserError: Constraints violated.' Supply the 'dynamic_shapes' argument instead if export is unsuccessful.
+  torch.onnx.export(
+[torch.onnx] Obtain model graph for `ResNet([...]` with `torch.export.export(..., strict=False)`...
+[torch.onnx] Obtain model graph for `ResNet([...]` with `torch.export.export(..., strict=False)`... ✅
+[torch.onnx] Run decompositions...
+[torch.onnx] Run decompositions... ✅
+[torch.onnx] Translate the graph into ONNX...
+[torch.onnx] Translate the graph into ONNX... ✅
+[torch.onnx] Optimize the ONNX graph...
+[torch.onnx] Optimize the ONNX graph... ✅
+wrote resnet18_fp32.onnx
+[torch.onnx] Obtain model graph for `ResNet([...]` with `torch.export.export(..., strict=False)`...
+[torch.onnx] Obtain model graph for `ResNet([...]` with `torch.export.export(..., strict=False)`... ✅
+[torch.onnx] Run decompositions...
+[torch.onnx] Run decompositions... ✅
+[torch.onnx] Translate the graph into ONNX...
+[torch.onnx] Translate the graph into ONNX... ✅
+[torch.onnx] Optimize the ONNX graph...
+[torch.onnx] Optimize the ONNX graph... ✅
+wrote resnet18_fp16.onnx
+
+================ Step 1: build TensorRT engine fp32 ================
+Fri Oct  2 15:30:58 PDT 2026
++ python3 build_engine.py fp32
+wrote resnet18_fp32.engine
+
+================ Step 1: build TensorRT engine fp16 ================
+Fri Oct  2 15:31:11 PDT 2026
++ python3 build_engine.py fp16
+wrote resnet18_fp16.engine
+
+================ Step 1: benchmark TensorRT vs PyTorch from GPU buffers ================
+Fri Oct  2 15:31:23 PDT 2026
++ python3 gpu_buffer_runner.py
+[10/02/2026-15:31:25] [TRT] [W] WARNING The logger passed into createInferRuntime differs from one already registered for an existing builder, runtime, or refitter. So the current new logger is ignored, and TensorRT will use the existing one which is returned by nvinfer1::getLogger() instead.
+GPU: NVIDIA GeForce RTX 3060 Laptop GPU
+impl           batch       ms    img/s    top1  maxdiff
+PyTorch FP32       1    2.709      369     ref      ref
+TRT FP32           1    2.471      405   1.000   0.0040
+TRT FP16           1    0.787     1270   1.000   0.0213
+PyTorch FP32       8    5.644     1418     ref      ref
+TRT FP32           8    3.955     2023   1.000   0.0077
+TRT FP16           8    1.288     6213   1.000   0.0237
+PyTorch FP32      32   19.307     1657     ref      ref
+TRT FP32          32   13.542     2363   1.000   0.0080
+TRT FP16          32    4.839     6613   1.000   0.0299
+wrote results.csv
+
+================ Step 2: build DPDK receiver ================
+Fri Oct  2 15:31:38 PDT 2026
++ make
+make: 'dpdk_rx' is up to date.
+
+================ Step 2: make packets (in order) ================
+Fri Oct  2 15:31:38 PDT 2026
++ python3 make_pcap.py
+wrote images.pcap (1728 packets) and frames.npy (16, 224, 224, 3)
+
+================ Step 2: DPDK receive and rebuild (in order) ================
+Fri Oct  2 15:31:40 PDT 2026
++ sudo ./dpdk_rx -l 0 --no-huge -m 512 --no-pci --vdev net_pcap0,rx_pcap=images.pcap,tx_pcap=/dev/null -- frames_rx.bin
+EAL: Detected CPU lcores: 16
+EAL: Detected NUMA nodes: 1
+EAL: Detected shared linkage of DPDK
+EAL: Multi-process socket /var/run/dpdk/rte/mp_socket
+EAL: Selected IOVA mode 'VA'
+TELEMETRY: No legacy callbacks, legacy socket not created
+packets=1728 dropped=0
+frames complete=16 incomplete=0 -> frames_rx.bin
+
+================ Step 2: classify received images (in order) ================
+Fri Oct  2 15:31:40 PDT 2026
++ python3 infer_rx.py
+GPU: NVIDIA GeForce RTX 3060 Laptop GPU
+frames received: 16 of 16
+byte-exact frames: 16 of 16
+prediction match (received vs original): 1.000
+CPU->GPU copy of 16 frames (2.41 MB): 1.842 ms
+
+================ Step 2: make packets (shuffled) ================
+Fri Oct  2 15:31:43 PDT 2026
++ python3 make_pcap.py --shuffle
+wrote images.pcap (1728 packets) and frames.npy (16, 224, 224, 3)
+
+================ Step 2: DPDK receive and rebuild (shuffled) ================
+Fri Oct  2 15:31:45 PDT 2026
++ sudo ./dpdk_rx -l 0 --no-huge -m 512 --no-pci --vdev net_pcap0,rx_pcap=images.pcap,tx_pcap=/dev/null -- frames_rx.bin
+EAL: Detected CPU lcores: 16
+EAL: Detected NUMA nodes: 1
+EAL: Detected shared linkage of DPDK
+EAL: Multi-process socket /var/run/dpdk/rte/mp_socket
+EAL: Selected IOVA mode 'VA'
+TELEMETRY: No legacy callbacks, legacy socket not created
+packets=1728 dropped=0
+frames complete=16 incomplete=0 -> frames_rx.bin
+
+================ Step 2: classify received images (shuffled) ================
+Fri Oct  2 15:31:45 PDT 2026
++ python3 infer_rx.py
+GPU: NVIDIA GeForce RTX 3060 Laptop GPU
+frames received: 16 of 16
+byte-exact frames: 16 of 16
+prediction match (received vs original): 1.000
+CPU->GPU copy of 16 frames (2.41 MB): 2.000 ms
+
+================ Step 3: machine meets DOCA GPUNetIO requirements ================
+Fri Oct  2 15:31:49 PDT 2026
++ bash check_doca_requirements.sh
+MISSING  ConnectX-6 Dx or newer, or BlueField NIC     none; NICs: 
+MISSING  RDMA device (mlx5_*)                         none
+OK       Linux kernel 6.2 or newer (dma-buf)          6.18.40.1-microsoft-standard-WSL2
+MISSING  NVIDIA open kernel driver                    proprietary or unknown
+MISSING  Not a VM (GPUNetIO in VMs is experimental)   VM type: microsoft
+
+GPU to NIC PCIe path (GPUNetIO wants them under one PCIe switch: PIX or PXB):
+nvidia-smi topo is not supported on WSL.
+
+================ Step 3: open-source GPUNetIO (GPU arch 86) ================
+Fri Oct  2 15:31:49 PDT 2026
+Reading package lists...
+Building dependency tree...
+Reading state information...
+rdma-core is already the newest version (50.0-2ubuntu0.2).
+libibverbs-dev is already the newest version (50.0-2ubuntu0.2).
+ibverbs-utils is already the newest version (50.0-2ubuntu0.2).
+0 upgraded, 0 newly installed, 0 to remove and 90 not upgraded.
+RDMA devices:
+Failed to get IB devices list: Function not implemented
+Network cards:
+make: Entering directory '/home/krish/EE542-Lab-Testing/step2/gpunetio'
+Configuring library
+Compiling src/doca_verbs_dev.cpp -> obj/doca_verbs_dev.o
+Compiling src/doca_verbs_qp.cpp -> obj/doca_verbs_qp.o
+Compiling src/doca_verbs_cq.cpp -> obj/doca_verbs_cq.o
+Compiling src/doca_verbs_device_attr.cpp -> obj/doca_verbs_device_attr.o
+Compiling src/doca_verbs_umem.cpp -> obj/doca_verbs_umem.o
+Compiling src/doca_verbs_srq.cpp -> obj/doca_verbs_srq.o
+Compiling src/doca_verbs_uar.cpp -> obj/doca_verbs_uar.o
+Compiling src/doca_gpunetio.cpp -> obj/doca_gpunetio.o
+Compiling src/doca_gpunetio_log.cpp -> obj/doca_gpunetio_log.o
+Compiling src/doca_gpunetio_high_level.cpp -> obj/doca_gpunetio_high_level.o
+Compiling src/doca_gpunetio_gdrcopy.cpp -> obj/doca_gpunetio_gdrcopy.o
+Compiling src/doca_gpunetio_sdk_wrapper.cpp -> obj/doca_gpunetio_sdk_wrapper.o
+Compiling src/doca_verbs_dev_sdk_wrapper.cpp -> obj/doca_verbs_dev_sdk_wrapper.o
+Compiling src/doca_verbs_umem_sdk_wrapper.cpp -> obj/doca_verbs_umem_sdk_wrapper.o
+Compiling src/doca_verbs_uar_sdk_wrapper.cpp -> obj/doca_verbs_uar_sdk_wrapper.o
+Compiling src/doca_verbs_cq_sdk_wrapper.cpp -> obj/doca_verbs_cq_sdk_wrapper.o
+Compiling src/doca_verbs_qp_sdk_wrapper.cpp -> obj/doca_verbs_qp_sdk_wrapper.o
+make[1]: Entering directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_put_bw'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_put_bw'
+make[1]: Entering directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_lat'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_lat'
+make[1]: Entering directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_bw'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/gpunetio_verbs_write_bw'
+Linking library lib/libdoca_gpunetio_host.so.4.0.1
+Installing library to /home/krish/EE542-Lab-Testing/step2/gpunetio/install/lib and headers to /home/krish/EE542-Lab-Testing/step2/gpunetio/install/include
+Installing examples to /home/krish/EE542-Lab-Testing/step2/gpunetio/install/examples
+make: Leaving directory '/home/krish/EE542-Lab-Testing/step2/gpunetio'
+Fri Oct  2 15:31:54 2026 [INFO] [/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/verbs_common.cpp]: 256: create_verbs_resources(): Setting GPU device 0 at 01:00.0
+Fri Oct  2 15:31:54 2026 [WARNING] [src/doca_gpunetio_sdk_wrapper.cpp]: 270: doca_gpu_sdk_wrapper_create(): Env var DOCA_SDK_LIB_PATH not set (null). DOCA SDK is not in use
+Fri Oct  2 15:31:54 2026 [INFO] [src/doca_gpunetio.cpp]: 150: doca_gpu_create(): Use DOCA GPUNetIO open
+Fri Oct  2 15:31:54 2026 [ERR] [src/doca_gpunetio_gdrcopy.cpp]: 128: doca_gpu_gdrcopy_ftable_init(): Failed to open libgdrapi.so.2
+Fri Oct  2 15:31:54 2026 [ERR] [src/doca_gpunetio_gdrcopy.cpp]: 179: doca_gpu_init_gdrcopy(): Error in doca_gpu_gdrcopy_ftable_init
+Fri Oct  2 15:31:54 2026 [INFO] [src/doca_gpunetio_gdrcopy.cpp]: 211: doca_gpu_gdrcopy_is_supported(): GDRCopy usage is disabled
+Fri Oct  2 15:31:54 2026 [ERR] [/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/verbs_common.cpp]: 170: open_ib_device(): Failed to get RDMA devices list, ibdev_list null
+Fri Oct  2 15:31:54 2026 [ERR] [/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/verbs_common.cpp]: 266: create_verbs_resources(): Failed to create doca network context
+Fri Oct  2 15:31:54 2026 [ERR] [/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/verbs_common.cpp]: 368: destroy_verbs_resources(): Failed to destroy doca verbs high-level qp
+Fri Oct  2 15:31:54 2026 [ERR] [/home/krish/EE542-Lab-Testing/step2/gpunetio/examples/verbs_common.cpp]: 358: create_verbs_resources(): Failed to destroy resources: 6
+Fri Oct  2 15:31:54 2026 [ERR] [gpunetio_verbs_write_lat_sample.cpp]: 276: verbs_server(): Failed to create local rdma resources: 18
+Fri Oct  2 15:31:54 2026 [ERR] [gpunetio_verbs_write_lat_main.cpp]: 108: main(): verbs_server() failed
+Fri Oct  2 15:31:54 2026 [INFO] [gpunetio_verbs_write_lat_main.cpp]: 125: main(): Sample finished with errors
+
+================ Step 3: GPUNetIO builds ================
+Fri Oct  2 15:31:54 PDT 2026
++ test -x gpunetio/install/examples/gpunetio_verbs_write_lat
+
+================ Step 3: GPUNetIO example runs ================
+Fri Oct  2 15:31:54 PDT 2026
++ bash -c [ -f logs/gpunetio_run.log ] && ! grep -q -i -E "failed|error" logs/gpunetio_run.log
+
+================ Step 4: pull DOCA container nvcr.io/nvidia/doca/doca:devel-cuda13.0.0-3.5.0-devel-host ================
+Fri Oct  2 15:31:54 PDT 2026
++ sudo docker pull nvcr.io/nvidia/doca/doca:devel-cuda13.0.0-3.5.0-devel-host
+devel-cuda13.0.0-3.5.0-devel-host: Pulling from nvidia/doca/doca
+Digest: sha256:546268c49599c49402b64b8309d487e0434ac1706bd26352dab842aff50eba1b
+Status: Image is up to date for nvcr.io/nvidia/doca/doca:devel-cuda13.0.0-3.5.0-devel-host
+nvcr.io/nvidia/doca/doca:devel-cuda13.0.0-3.5.0-devel-host
+
+================ Step 4: DOCA tools run ================
+Fri Oct  2 15:31:55 PDT 2026
++ doca doca_caps --version && doca_caps --list-libs
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 13.0.0
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+DOCA Version: 3.5.0098
+        common                                        installed
+        aes_gcm                                       installed
+        argp                                          installed
+        comch                                         installed
+        compress                                      installed
+        devemu_pci                                    installed
+        dma                                           installed
+        dpa                                           installed
+        dpdk_bridge                                   installed
+        erasure_coding                                installed
+        eth                                           installed
+        flow                                          installed
+        gpunetio                                      installed
+        mgmt                                          installed
+        pcc                                           installed
+        rdma                                          installed
+        sha                                           installed
+        telemetry                                     installed
+        telemetry_exporter                            installed
+        urom                                          installed
+        verbs                                         installed
+
+================ Step 4: DOCA finds a supported network card ================
+Fri Oct  2 15:31:56 PDT 2026
++ doca doca_caps --list-devs 2>&1 | tee /tmp/devs; grep -q -i mlx5 /tmp/devs
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 13.0.0
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+Failed to get device list, err=DOCA_ERROR_NOT_FOUND
+
+================ Step 4: build DOCA GPUNetIO sample ================
+Fri Oct  2 15:31:57 PDT 2026
++ doca cd /opt/mellanox/doca/samples/doca_gpunetio/gpunetio_simple_receive && rm -rf /build/rx && meson setup /build/rx && ninja -C /build/rx
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 13.0.0
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+The Meson build system
+Version: 1.3.2
+Source dir: /opt/mellanox/doca/samples/doca_gpunetio/gpunetio_simple_receive
+Build dir: /build/rx
+Build type: native build
+Program cat found: YES (/usr/bin/cat)
+Project name: DOCA_SAMPLE
+Project version: 3.5.0098
+C compiler for the host machine: cc (gcc 13.3.0 "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0")
+C linker for the host machine: cc ld.bfd 2.42
+C++ compiler for the host machine: c++ (gcc 13.3.0 "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0")
+C++ linker for the host machine: c++ ld.bfd 2.42
+Cuda compiler for the host machine: nvcc (nvcc 13.0.88
+Build cuda_13.0.r13.0/compiler.36424714_0)
+Cuda linker for the host machine: nvcc nvlink 13.0.88
+Build cuda_13.0.r13.0/compiler.36424714_0
+Host machine cpu family: x86_64
+Host machine cpu: x86_64
+Found pkg-config: YES (/usr/bin/pkg-config) 1.8.1
+Run-time dependency doca-common found: YES 3.5.0098
+Run-time dependency doca-gpunetio found: YES 3.5.0098
+Run-time dependency doca-argp found: YES 3.5.0098
+Run-time dependency doca-eth found: YES 3.5.0098
+Run-time dependency doca-flow found: YES 3.5.0098
+meson.build:57: WARNING: Module CUDA has no backwards or forwards compatibility and might not exist in future releases.
+Run-time dependency CUDA (modules: cudart, cuda) found: YES 13.0 (/usr/local/cuda)
+Build targets in project: 1
+
+Found ninja-1.11.1 at /usr/bin/ninja
+ninja: Entering directory `/build/rx'
+[1/6] Compiling C object doca_gpunetio_simple_receive.p/.._.._.._applications_common_utils.c.o
+[2/6] Compiling C object doca_gpunetio_simple_receive.p/gpunetio_simple_receive_main.c.o
+[3/6] Compiling C object doca_gpunetio_simple_receive.p/.._.._common.c.o
+[4/6] Compiling C object doca_gpunetio_simple_receive.p/host_gpunetio_simple_receive_sample.c.o
+[5/6] Compiling Cuda object doca_gpunetio_simple_receive.p/device_gpunetio_simple_receive_kernel.cu.o
+[6/6] Linking target doca_gpunetio_simple_receive
+
+================ Step 4: run DOCA GPUNetIO sample (NIC 00:00.0, GPU 01:00.0) ================
+Fri Oct  2 15:32:06 PDT 2026
++ doca timeout 20 /build/rx/doca_gpunetio_simple_receive -n 00:00.0 -g 01:00.0 -e 0; [ $? -eq 124 ]
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 13.0.0
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+[2026-10-02 22:32:07:134160][1648193536][DOCA][INF][GPUNETIO_SIMPLE_RECEIVE][gpunetio_simple_receive_main.c:198][main] Starting the sample
+[2026-10-02 22:32:07:133722][1648193536][DOCA][INF][CORE][doca_log.cpp:1335] DOCA version 3.5.0098
+[2026-10-02 22:32:07:356204][1648193536][DOCA][INF][GPUNETIO_SIMPLE_RECEIVE][gpunetio_simple_receive_main.c:240][main] Sample configuration:
+	GPU 01:00.0
+	NIC 00:00.0
+	Receive exec scope Thread
+	
+[2026-10-02 22:32:07:357610][1648193536][DOCA][INF][GPUNETIO_SIMPLE_RECEIVE][gpunetio_simple_receive_main.c:261][main] Sample finished with errors
+[2026-10-02 22:32:07:357565][1648193536][DOCA][ERR][CORE][linux_devices_factory.cpp:48] Failed to get RDMA devices list, ibdev_list null
+[2026-10-02 22:32:07:357594][1648193536][DOCA][ERR][CORE][doca_dev.cpp:660] Failed to create list of local devices: failed to get RDMA devices list. maybe missing RDMA kernel support?. err=DOCA_ERROR_NOT_FOUND
+[2026-10-02 22:32:07:357598][1648193536][DOCA][ERR][COMMON][common.c:70][open_doca_device_with_pci_and_callback] Failed to load doca devices list: Requested Resource Not Found
+[2026-10-02 22:32:07:357600][1648193536][DOCA][ERR][GPUNETIO_SIMPLE_RECEIVE][gpunetio_simple_receive_sample.c:85][init_doca_device] Failed to open NIC device based on PCI address
+[2026-10-02 22:32:07:357602][1648193536][DOCA][ERR][GPUNETIO_SIMPLE_RECEIVE][gpunetio_simple_receive_sample.c:659][gpunetio_simple_receive] Function init_doca_device returned Requested Resource Not Found
+[2026-10-02 22:32:07:357603][1648193536][DOCA][ERR][GPUNETIO_SIMPLE_RECEIVE][gpunetio_simple_receive_main.c:249][main] gpunetio_simple_receive() encountered an error: Requested Resource Not Found
+
+================ Summary ================
+Fri Oct  2 15:32:07 PDT 2026
+PASS     Step 1: versions
+PASS     Step 1: export ResNet-18 to ONNX (fp32, fp16)
+PASS     Step 1: build TensorRT engine fp32
+PASS     Step 1: build TensorRT engine fp16
+PASS     Step 1: benchmark TensorRT vs PyTorch from GPU buffers
+PASS     Step 2: build DPDK receiver
+PASS     Step 2: make packets (in order)
+PASS     Step 2: DPDK receive and rebuild (in order)
+PASS     Step 2: classify received images (in order)
+PASS     Step 2: make packets (shuffled)
+PASS     Step 2: DPDK receive and rebuild (shuffled)
+PASS     Step 2: classify received images (shuffled)
+BLOCKED  Step 3: machine meets DOCA GPUNetIO requirements
+PASS     Step 3: GPUNetIO builds
+BLOCKED  Step 3: GPUNetIO example runs
+PASS     Step 4: pull DOCA container nvcr.io/nvidia/doca/doca:devel-cuda13.0.0-3.5.0-devel-host
+PASS     Step 4: DOCA tools run
+BLOCKED  Step 4: DOCA finds a supported network card
+PASS     Step 4: build DOCA GPUNetIO sample
+BLOCKED  Step 4: run DOCA GPUNetIO sample (NIC 00:00.0, GPU 01:00.0)
+
+Step 1 results (ms per batch):
+impl,batch,ms_per_batch,top1_agreement,max_logit_diff
+PyTorch FP32,1,2.709,ref,ref
+TRT FP32,1,2.471,1.000,0.0040
+TRT FP16,1,0.787,1.000,0.0213
+PyTorch FP32,8,5.644,ref,ref
+TRT FP32,8,3.955,1.000,0.0077
+TRT FP16,8,1.288,1.000,0.0237
+PyTorch FP32,32,19.307,ref,ref
+TRT FP32,32,13.542,1.000,0.0080
+TRT FP16,32,4.839,1.000,0.0299
+
+Step 2 results:
+GPU: NVIDIA GeForce RTX 3060 Laptop GPU
+frames received: 16 of 16
+byte-exact frames: 16 of 16
+prediction match (received vs original): 1.000
+CPU->GPU copy of 16 frames (2.41 MB): 2.000 ms
+
+DOCA GPUNetIO requirements on this machine:
+MISSING  ConnectX-6 Dx or newer, or BlueField NIC     none; NICs: 
+MISSING  RDMA device (mlx5_*)                         none
+OK       Linux kernel 6.2 or newer (dma-buf)          6.18.40.1-microsoft-standard-WSL2
+MISSING  NVIDIA open kernel driver                    proprietary or unknown
+MISSING  Not a VM (GPUNetIO in VMs is experimental)   VM type: microsoft
+
+Full log: /home/krish/EE542-Lab-Testing/logs/run_all_20261002_153044.log

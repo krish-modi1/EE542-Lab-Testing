@@ -1,3 +1,0 @@
-packets=1728 dropped=0 duplicates=0
-frames complete=16 incomplete=0 -> frames_rx.bin
-elapsed 0.016 s (includes 200000 idle polls at the end)
