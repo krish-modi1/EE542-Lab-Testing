@@ -9,10 +9,13 @@ GPUNetIO lets the network card write packets straight into GPU memory, so the CP
 | 1 | TensorRT CNN reading its input from GPU memory | Works. FP16 is about 5x faster than PyTorch with the same predictions |
 | 2 | Images sent as UDP packets, rebuilt with DPDK, then classified | Works. 1,728 packets, 16 of 16 images rebuilt exactly, predictions match |
 | 3 | NVIDIA's open-source DOCA GPUNetIO | Builds, then stops: no RDMA network card on the machine |
+| 4 | NVIDIA's official DOCA container from NGC | Not run yet (see `run_all.sh`) |
 
 ## Repo layout
 
 ```
+run_all.sh              run every step below and write one shareable log
+CLAUDE.md               context for running and fixing this with Claude Code
 step1/
   setup_check.sh        print GPU, driver, CUDA and package versions
   export_onnx.py        ResNet-18 -> resnet18_fp32.onnx and resnet18_fp16.onnx
@@ -23,7 +26,8 @@ step2/
   make_pcap.py          16 images -> 1,728 UDP packets in images.pcap
   dpdk_rx.c, Makefile   DPDK program that reads images.pcap and rebuilds the images
   infer_rx.py           classify the rebuilt images with the Step 1 engine
-  build_gpunetio.sh     Step 3: build NVIDIA's GPUNetIO and run one example
+  check_doca_requirements.sh  Step 3: compare this machine with what GPUNetIO needs
+  build_gpunetio.sh     Step 3: build NVIDIA's open-source GPUNetIO and run one example
   logs/                 our DPDK, GPUNetIO build and GPUNetIO run logs
   step2_results.txt     our Step 2 results
 ```
@@ -31,6 +35,15 @@ step2/
 ## What you need
 
 Any Linux machine with an NVIDIA GPU that has tensor cores (RTX 30xx or 40xx, T4, L4, A10 or newer) and root access. We used a Vast.ai VM: RTX 3060 12 GB, Ubuntu 22.04, driver 580, CUDA 12.6, TensorRT 11.3, PyTorch 2.14. A laptop GPU also works for Steps 1 and 2.
+
+## Run everything at once
+
+```bash
+bash run_all.sh                 # first run: installs everything, then runs all steps
+SKIP_SETUP=1 bash run_all.sh    # later runs
+```
+
+The script installs the packages, runs Steps 1 to 4 and writes one log to `logs/run_all_<date>.log`. The log ends with one line per check: PASS, FAIL or BLOCKED. BLOCKED means the step needs an NVIDIA RDMA network card that the machine does not have. The sections below explain each step and how to run it by hand.
 
 ## Setup (once)
 
@@ -108,10 +121,13 @@ The predicted classes themselves are meaningless, because the test images are sy
 
 ```bash
 cd step2
+bash check_doca_requirements.sh
 bash build_gpunetio.sh 86            # 86 = RTX 30xx; use 89 for RTX 40xx or L4, 90 for H100
 ```
 
-The script lists the machine's RDMA devices and network cards, builds NVIDIA's open-source GPUNetIO for your GPU, and runs one of its examples.
+`check_doca_requirements.sh` prints OK or MISSING for each GPUNetIO requirement: an NVIDIA ConnectX or BlueField card, an RDMA device, kernel 6.2 or newer, the NVIDIA open kernel driver, and bare metal instead of a VM. It also prints the PCIe path between the GPU and the network card.
+
+`build_gpunetio.sh` lists the machine's RDMA devices and network cards, builds NVIDIA's open-source GPUNetIO for your GPU, and runs one of its examples.
 
 On our VM, the build succeeded, and the example stopped with:
 
@@ -120,6 +136,10 @@ open_ib_device(): Failed to get RDMA devices list, ibdev_list null
 ```
 
 `ibv_devices` listed no RDMA devices, and `lspci` showed only a `Virtio network device`, which is the simple virtual card the cloud provider emulates. GPUNetIO needs the GPU to talk directly to an NVIDIA RDMA card, so with no such card it cannot start. The `Failed to open libgdrapi.so.2` line in the same log refers to GDRCopy, an optional speed-up library, and is not the cause.
+
+## Step 4: NVIDIA's official DOCA container
+
+NVIDIA publishes a free DOCA container on NGC with the full SDK, tools and samples. `run_all.sh` pulls it, asks DOCA which devices it can see (`doca_caps --list-devs`), builds NVIDIA's `gpunetio_simple_receive` sample and tries to run it. The container gives you the software, not the hardware: DOCA has no simulated network card, so on a machine without a ConnectX or BlueField card the device check and the sample run should end BLOCKED, the same as Step 3. The image needs Docker with GPU access (so it does not work inside a Vast "container" instance) and NVIDIA driver 580 or newer. For an older driver, pick a CUDA 12 `-devel-host` tag from the [NGC page](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/doca/containers/doca) and run `DOCA_IMG=nvcr.io/nvidia/doca/doca:<tag> bash run_all.sh`.
 
 ## How this maps to the real lab
 
