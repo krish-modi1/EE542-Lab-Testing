@@ -1,8 +1,7 @@
-# Recipes use '>' instead of a tab so the file survives copy/paste and web editors.
+# Build the DPDK receiver. Recipes start with '>' instead of a tab (.RECIPEPREFIX).
 .RECIPEPREFIX = >
-PKGCONF ?= pkg-config
-CFLAGS += -O2 -Wall $(shell $(PKGCONF) --cflags libdpdk)
-LDLIBS += $(shell $(PKGCONF) --libs libdpdk)
+CFLAGS += -O2 -Wall $(shell pkg-config --cflags libdpdk)
+LDLIBS += $(shell pkg-config --libs libdpdk)
 
 dpdk_rx: dpdk_rx.c
 > $(CC) $(CFLAGS) -o $@ $< $(LDLIBS)
