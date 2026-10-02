@@ -20,6 +20,7 @@ BATCHES = [1, 8, 32]
 WARMUP, ITERS = 20, 200
 dev = torch.device("cuda")
 logger = trt.Logger(trt.Logger.WARNING)
+TRT2TORCH = {trt.float32: torch.float32, trt.float16: torch.float16}
 
 
 def load_engine(path):
@@ -31,9 +32,12 @@ def trt_infer_fn(engine, batch):
     """Return a closure that runs one inference on a device buffer of the given batch size."""
     ctx = engine.create_execution_context()
     ctx.set_input_shape("input", (batch, 3, 224, 224))
+    # Buffer dtypes follow the engine: FP32 engine -> float32, FP16 engine -> float16.
+    in_dt = TRT2TORCH[engine.get_tensor_dtype("input")]
+    out_dt = TRT2TORCH[engine.get_tensor_dtype("logits")]
     # These two tensors are the "DOCA-delivered" input buffer and the output buffer.
-    inp = torch.empty((batch, 3, 224, 224), device=dev, dtype=torch.float32)
-    out = torch.empty((batch, 1000), device=dev, dtype=torch.float32)
+    inp = torch.empty((batch, 3, 224, 224), device=dev, dtype=in_dt)
+    out = torch.empty((batch, 1000), device=dev, dtype=out_dt)
     ctx.set_tensor_address("input", inp.data_ptr())   # raw device pointer
     ctx.set_tensor_address("logits", out.data_ptr())
     stream = torch.cuda.Stream()
@@ -42,7 +46,7 @@ def trt_infer_fn(engine, batch):
         # Copy and inference on the same stream so they are ordered.
         # In the real pipeline the NIC would fill `inp` instead of this copy.
         with torch.cuda.stream(stream):
-            inp.copy_(src, non_blocking=True)
+            inp.copy_(src, non_blocking=True)  # also casts float32 -> float16 for the FP16 engine
             ctx.execute_async_v3(stream.cuda_stream)
         return out
 
