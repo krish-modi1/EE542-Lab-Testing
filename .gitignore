@@ -1,3 +1,8 @@
 *.onnx
 *.engine
+*.pcap
+*.npy
+*.bin
 __pycache__/
+step2/dpdk_rx
+step2/gpunetio/
