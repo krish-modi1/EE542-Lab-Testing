@@ -2,4 +2,4 @@ GPU: NVIDIA GeForce RTX 3060 Laptop GPU
 frames received: 16 of 16
 byte-exact frames: 16 of 16
 prediction match (received vs original): 1.000
-CPU->GPU copy of 16 frames (2.41 MB): 1.815 ms
+CPU->GPU copy of 16 frames (2.41 MB): 4.013 ms

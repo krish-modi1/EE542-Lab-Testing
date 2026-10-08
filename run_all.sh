@@ -9,6 +9,7 @@
 #
 # Usage:  bash run_all.sh                 everything
 #         SKIP_SETUP=1 bash run_all.sh    skip installs (second run onwards)
+#         SKIP_DOCA=1 bash run_all.sh     Steps 1-2 only (cloudlab/boot.sh uses this)
 # Output: logs/run_all_<date>.log, with a summary at the end.
 set -o pipefail
 cd "$(dirname "$0")" || exit 1
@@ -109,6 +110,7 @@ check "Step 2: DPDK receive and rebuild (shuffled)" sudo ./dpdk_rx "${DPDK_ARGS[
 check "Step 2: classify received images (shuffled)" python3 infer_rx.py
 
 # ---------------------------------------------------------------- step 3
+if [ -z "$SKIP_DOCA" ]; then  # steps 3 and 4 (not indented to keep the diff small)
 GPU_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | tr -d .)
 blocker "Step 3: machine meets DOCA GPUNetIO requirements" bash check_doca_requirements.sh
 section "Step 3: open-source GPUNetIO (GPU arch $GPU_ARCH)"
@@ -141,6 +143,7 @@ check "Step 4: build DOCA GPUNetIO sample" doca \
 # The sample loops forever once it starts, so a timeout (exit 124) means it worked.
 blocker "Step 4: run DOCA GPUNetIO sample (NIC $NIC_PCI, GPU $GPU_PCI)" doca \
 	"timeout 20 /build/rx/doca_gpunetio_simple_receive -n $NIC_PCI -g $GPU_PCI -e 0; [ \$? -eq 124 ]"
+fi
 
 # ---------------------------------------------------------------- summary
 section "Summary"

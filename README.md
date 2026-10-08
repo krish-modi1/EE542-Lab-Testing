@@ -16,6 +16,10 @@ GPUNetIO lets the network card write packets straight into GPU memory, so the CP
 ```
 run_all.sh              run every step below and write one shareable log
 CLAUDE.md               context for running and fixing this with Claude Code
+profile.py              CloudLab profile: two d7525 nodes (see "CloudLab" below)
+cloudlab/
+  boot.sh               unattended node setup, runs on every boot
+  gpunetio_test.sh      two-node GPUNetIO send/receive test, run by hand
 step1/
   setup_check.sh        print GPU, driver, CUDA and package versions
   export_onnx.py        ResNet-18 -> resnet18_fp32.onnx and resnet18_fp16.onnx
@@ -151,6 +155,42 @@ NVIDIA publishes a free DOCA container on NGC with the full SDK, tools and sampl
 | TensorRT classifies the images in GPU memory | Same: `make_runner()` from Step 1 |
 
 To run the left column you need two machines, each with a GPU and a ConnectX-6 Dx (or newer) or BlueField card. Standard cloud GPUs, Vast.ai instances and Lab 6's T4 and V100 instances do not have one. CloudLab's Wisconsin d7525 nodes have an A30 GPU and a ConnectX-6 Dx card and are free for research and teaching, but a faculty member has to create the project (https://docs.cloudlab.us/users.html).
+
+## CloudLab (real DOCA hardware)
+
+`profile.py` is a CloudLab repository-based profile (CloudLab reads it from the repo root and clones the repo to `/local/repository` on every node). It creates two bare-metal d7525 nodes at Wisconsin (NVIDIA A30 + ConnectX-6 Dx, Ubuntu 24.04) on one LAN: `node0` = receiver at 10.10.1.1, `node1` = sender at 10.10.1.2. Each node gets a `/mydata` filesystem on the rest of its disk and runs `cloudlab/boot.sh` on every boot.
+
+`cloudlab/boot.sh` needs no one at the keyboard. It runs as root and takes about 1 to 2 hours:
+
+| Stage | What it does |
+|---|---|
+| 1 hw | Records the GPU, the NIC behind 10.10.1.x, its mlx5 device and MAC in `hw_<hostname>.env` |
+| 2 driver | NVIDIA open driver (580 branch) and CUDA 13.0, reboots once if the driver needs it |
+| 3 gpunetio | Host setup from NVIDIA's GPUNetIO guide: dmabuf checks, GDRCopy, hugepages, persistence mode, BAR1, ACS, topology, IOMMU and NIC firmware checks |
+| 4 docker | Docker (data on `/mydata/docker`), NVIDIA container toolkit, DOCA image, `doca_caps --list-devs` must show an mlx5 device |
+| 5 sample | Builds `gpunetio_simple_receive` and starts it once with no traffic, to prove NIC and GPU setup work |
+| 6 baseline | node0 only: `run_all.sh` Steps 1 and 2 on the A30 |
+
+It can run twice safely: stages 2 and 6 are skipped once they pass, and the others check before installing. If something failed, run it again by hand with `sudo bash /local/repository/cloudlab/boot.sh receiver` (or `sender`). `DRY_RUN=1 bash cloudlab/boot.sh receiver` runs only stage 1 and prints the other stages without running them.
+
+Logs on each node, in `/mydata/logs/`:
+
+- `SUMMARY_<hostname>.txt`: one PASS, FAIL or INFO line per check. Read this first.
+- `boot_<hostname>.log`: everything, with start and end times for each stage
+- `hw_<hostname>.env`, `doca_caps_<hostname>.txt`, `sample_start_<hostname>.log`, `mstconfig_<hostname>.txt`, and on node0 the `run_all_*.log`
+
+The send and receive test is run by hand:
+
+```bash
+# node1, before starting the receiver (so node1 learns node0's MAC from ARP)
+ping -c 3 10.10.1.1
+# node0: run the GPUNetIO receiver for 120 s (DURATION=300 for longer)
+bash /local/repository/cloudlab/gpunetio_test.sh receive
+# node1, while the receiver runs: send Step 2's 1,728 image packets to node0
+bash /local/repository/cloudlab/gpunetio_test.sh send
+```
+
+The test passes when the receiver's own output says `Total number of received packets:` with a number above zero. If the sender cannot find node0's MAC, copy it from the receiver's output and run `DST_MAC=<mac> bash gpunetio_test.sh send`. Results go to `/mydata/logs/gpunetio_test_<hostname>.log`.
 
 ## Problems we hit
 
